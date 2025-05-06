@@ -1,9 +1,11 @@
 "use client";
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
+import { getStudents, getStudentTranscript, getDepartments, getStaff } from '../../lib/api';
+import { User } from '../../types';
 
 // Placeholder icons
 const UserIcon = () => <svg className="w-5 h-5 inline-block mr-2" fill="currentColor" viewBox="0 0 20 20"><path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"></path></svg>;
@@ -14,8 +16,110 @@ const EyeIcon = () => <svg className="w-4 h-4 inline-block mr-1" fill="currentCo
 
 export default function DepartmentSecretaryDashboard() {
   const { data: session, status } = useSession();
+  const [departmentInfo, setDepartmentInfo] = useState<any>(null);
+  const [students, setStudents] = useState<any[]>([]);
+  const [advisors, setAdvisors] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [approvalStatus, setApprovalStatus] = useState("PENDING");
+  const [advisorApprovalsCompleted, setAdvisorApprovalsCompleted] = useState(false);
 
-  if (status === "loading") {
+  useEffect(() => {
+    async function loadData() {
+      const user = session?.user as User;
+      if (user?.ubysId) {
+        setLoading(true);
+        try {
+          // Get staff to find department information
+          const staffData = await getStaff();
+          const currentUser = staffData.find((staff: any) => staff.ubysId === user.ubysId);
+          
+          if (currentUser && currentUser.additionalInfo?.departmentUbysId) {
+            // Get department information
+            const departments = await getDepartments();
+            const departmentData = departments.find(
+              (dept: any) => dept.ubysDepartmentId === currentUser.additionalInfo.departmentUbysId
+            );
+            
+            if (departmentData) {
+              setDepartmentInfo(departmentData);
+              
+              // Get students from this department
+              const departmentStudents = await getStudents({
+                departmentUbysId: currentUser.additionalInfo.departmentUbysId
+              });
+              
+              // Get staff to map advisors
+              const advisorsList = staffData.filter(
+                (staff: any) => staff.role === "ADVISOR" && 
+                staff.additionalInfo?.departmentUbysId === currentUser.additionalInfo.departmentUbysId
+              );
+              setAdvisors(advisorsList);
+              
+              // Enhance student data with advisor info and transcripts
+              const enhancedStudents = await Promise.all(
+                departmentStudents.map(async (student: any, index: number) => {
+                  try {
+                    const transcript = await getStudentTranscript(student.ubysId);
+                    const advisorInfo = advisorsList.find(
+                      (advisor: any) => advisor.ubysId === student.additionalInfo.advisorUbysId
+                    );
+                    
+                    return {
+                      id: student.ubysId,
+                      name: `${student.firstName} ${student.lastName}`,
+                      studentNo: student.additionalInfo.studentNo,
+                      gpa: transcript?.summary?.cumulativeGpa || 0,
+                      advisorName: advisorInfo ? `${advisorInfo.firstName} ${advisorInfo.lastName}` : 'Unknown',
+                      advisorUbysId: student.additionalInfo.advisorUbysId,
+                      approvalDate: "2023-05-15", // Placeholder, would come from a real approval system
+                      departmentRank: index + 1, // Simple rank based on array order
+                    };
+                  } catch (err) {
+                    console.error(`Error fetching transcript for student ${student.ubysId}:`, err);
+                    return {
+                      id: student.ubysId,
+                      name: `${student.firstName} ${student.lastName}`,
+                      studentNo: student.additionalInfo.studentNo,
+                      gpa: 0,
+                      advisorName: 'Unknown',
+                      advisorUbysId: student.additionalInfo.advisorUbysId,
+                      approvalDate: "N/A",
+                      departmentRank: index + 1,
+                    };
+                  }
+                })
+              );
+              
+              // Sort by GPA for department ranking
+              enhancedStudents.sort((a, b) => b.gpa - a.gpa);
+              
+              // Reassign rank after sorting
+              enhancedStudents.forEach((student, index) => {
+                student.departmentRank = index + 1;
+              });
+              
+              setStudents(enhancedStudents);
+              
+              // Check if all advisors have completed their approvals (mocked)
+              setAdvisorApprovalsCompleted(enhancedStudents.length > 0);
+            }
+          }
+        } catch (err) {
+          setError('Failed to load department data');
+          console.error('Department data loading error:', err);
+        } finally {
+          setLoading(false);
+        }
+      }
+    }
+
+    if (status === 'authenticated') {
+      loadData();
+    }
+  }, [session, status]);
+
+  if (status === "loading" || loading) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="text-lg font-semibold text-gray-600">Loading Dashboard...</div>
@@ -23,17 +127,8 @@ export default function DepartmentSecretaryDashboard() {
     );
   }
 
-  const user = session?.user as any;
-  const mockDepartmentName = "Computer Engineering";
-  const mockApprovalStatus: string = "PENDING";
-  const mockAdvisorApprovalsCompleted = false;
+  const user = session?.user as User;
   
-  const mockStudents = [
-    { id: "student1", name: "John Student", studentNo: "202011001", gpa: 3.65, advisorName: "Jane Advisor", approvalDate: "2023-05-15", departmentRank: 1 },
-    { id: "student2", name: "Alice Smith", studentNo: "202011002", gpa: 3.42, advisorName: "Jane Advisor", approvalDate: "2023-05-14", departmentRank: 2 },
-    { id: "student3", name: "Bob Johnson", studentNo: "202011003", gpa: 3.21, advisorName: "Mark Wilson", approvalDate: "2023-05-16", departmentRank: 3 },
-  ];
-
   return (
     <div className="space-y-8">
       <h1 className="text-3xl font-bold text-[rgb(var(--primary))]">Department Secretary Dashboard</h1>
@@ -51,7 +146,7 @@ export default function DepartmentSecretaryDashboard() {
           </div>
           <div>
             <p className="text-sm text-gray-500">Department</p>
-            <p className="text-lg font-medium text-gray-800">{mockDepartmentName}</p>
+            <p className="text-lg font-medium text-gray-800">{departmentInfo?.name || "Loading..."}</p>
           </div>
           <div>
             <p className="text-sm text-gray-500">Role</p>
@@ -65,42 +160,59 @@ export default function DepartmentSecretaryDashboard() {
           <h2 className="text-2xl font-semibold text-gray-700 mb-2 sm:mb-0">Department Approval Status</h2>
           <div className="flex items-center">
             <div className={`w-4 h-4 rounded-full mr-2 ${
-              mockApprovalStatus === "APPROVED" ? "bg-green-500" : 
-              mockApprovalStatus === "REJECTED" ? "bg-red-500" : "bg-yellow-400"
+              approvalStatus === "APPROVED" ? "bg-green-500" : 
+              approvalStatus === "REJECTED" ? "bg-red-500" : "bg-yellow-400"
             }`}></div>
             <span className={`font-semibold text-lg ${
-              mockApprovalStatus === "APPROVED" ? "text-green-600" : 
-              mockApprovalStatus === "REJECTED" ? "text-red-600" : "text-yellow-500"
+              approvalStatus === "APPROVED" ? "text-green-600" : 
+              approvalStatus === "REJECTED" ? "text-red-600" : "text-yellow-500"
             }`}>
-              {mockApprovalStatus === "APPROVED" ? "Approved" : 
-               mockApprovalStatus === "REJECTED" ? "Rejected" : "Pending Review"}
+              {approvalStatus === "APPROVED" ? "Approved" : 
+               approvalStatus === "REJECTED" ? "Rejected" : "Pending Review"}
             </span>
           </div>
         </div>
         
         <div className="flex justify-between items-center mb-4">
           <p className="text-base text-gray-600">All advisor approvals completed:</p>
-          <span className={`font-semibold text-base px-3 py-1 rounded-full text-xs shadow-sm ${mockAdvisorApprovalsCompleted ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-            {mockAdvisorApprovalsCompleted ? "Yes" : "No"}
+          <span className={`font-semibold text-base px-3 py-1 rounded-full text-xs shadow-sm ${advisorApprovalsCompleted ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+            {advisorApprovalsCompleted ? "Yes" : "No"}
           </span>
         </div>
         
-        {!mockAdvisorApprovalsCompleted && (
+        {!advisorApprovalsCompleted && (
           <p className="text-sm text-gray-500 bg-gray-50 p-3 rounded-lg border border-gray-200">
             Waiting for all advisors to complete their approvals before department approval can be finalized.
           </p>
         )}
         
-        {mockAdvisorApprovalsCompleted && mockApprovalStatus === "PENDING" && (
+        {advisorApprovalsCompleted && approvalStatus === "PENDING" && (
           <div className="mt-6 pt-4 border-t border-gray-200 flex space-x-3">
-            <Button variant="success" size="md" onClick={() => {}} icon={<CheckCircleIcon />}>Approve All</Button>
-            <Button variant="danger" size="md" onClick={() => {}} icon={<XCircleIcon />}>Reject All</Button>
+            <Button 
+              variant="success" 
+              size="md" 
+              icon={<CheckCircleIcon />}
+              onClick={() => setApprovalStatus("APPROVED")}
+            >
+              Approve All
+            </Button>
+            <Button 
+              variant="danger" 
+              size="md" 
+              icon={<XCircleIcon />}
+              onClick={() => setApprovalStatus("REJECTED")}
+            >
+              Reject All
+            </Button>
           </div>
         )}
       </Card>
       
       <Card>
         <h2 className="text-2xl font-semibold mb-6 text-gray-700 flex items-center"><ListIcon /> Students Approved by Advisors</h2>
+        {error && (
+          <div className="text-red-500 mb-4">{error}</div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead className="bg-gray-50">
@@ -115,21 +227,118 @@ export default function DepartmentSecretaryDashboard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {mockStudents.map((student) => (
-                <tr key={student.id} className="hover:bg-gray-50 transition-colors duration-150">
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-center font-medium">{student.departmentRank}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-700 font-medium">{student.name}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-600">{student.studentNo}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-center">{student.gpa.toFixed(2)}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-600">{student.advisorName}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-600">{student.approvalDate}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-center">
-                    <Button variant="outline" size="md" onClick={() => {}} icon={<EyeIcon />}>View Details</Button>
+              {students.length > 0 ? (
+                students.map((student) => (
+                  <tr key={student.id} className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-center font-medium">{student.departmentRank}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-700 font-medium">{student.name}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-600">{student.studentNo}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-center">{typeof student.gpa === 'number' ? student.gpa.toFixed(2) : student.gpa}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-600">{student.advisorName}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-600">{student.approvalDate}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                      <Button variant="outline" size="sm" icon={<EyeIcon />}>View Details</Button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
+                    No students data available
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
+        </div>
+        <div className="mt-4">
+          <Button 
+            variant="primary" 
+            onClick={() => {
+              const user = session?.user as User;
+              if (user?.ubysId) {
+                setLoading(true);
+                Promise.all([getStaff(), getDepartments()])
+                  .then(([staffData, departments]) => {
+                    const currentUser = staffData.find((staff: any) => staff.ubysId === user.ubysId);
+                    if (currentUser && currentUser.additionalInfo?.departmentUbysId) {
+                      const departmentData = departments.find(
+                        (dept: any) => dept.ubysDepartmentId === currentUser.additionalInfo.departmentUbysId
+                      );
+                      if (departmentData) {
+                        setDepartmentInfo(departmentData);
+                        return getStudents({
+                          departmentUbysId: currentUser.additionalInfo.departmentUbysId
+                        }).then(departmentStudents => {
+                          return { departmentStudents, staffData };
+                        });
+                      }
+                    }
+                    throw new Error("Could not find department information");
+                  })
+                  .then(({ departmentStudents, staffData }) => {
+                    const advisorsList = staffData.filter(
+                      (staff: any) => staff.role === "ADVISOR" && 
+                      staff.additionalInfo?.departmentUbysId === departmentInfo.ubysDepartmentId
+                    );
+                    setAdvisors(advisorsList);
+                    
+                    return Promise.all(
+                      departmentStudents.map(async (student: any, index: number) => {
+                        try {
+                          const transcript = await getStudentTranscript(student.ubysId);
+                          const advisorInfo = advisorsList.find(
+                            (advisor: any) => advisor.ubysId === student.additionalInfo.advisorUbysId
+                          );
+                          
+                          return {
+                            id: student.ubysId,
+                            name: `${student.firstName} ${student.lastName}`,
+                            studentNo: student.additionalInfo.studentNo,
+                            gpa: transcript?.summary?.cumulativeGpa || 0,
+                            advisorName: advisorInfo ? `${advisorInfo.firstName} ${advisorInfo.lastName}` : 'Unknown',
+                            advisorUbysId: student.additionalInfo.advisorUbysId,
+                            approvalDate: "2023-05-15", // Placeholder
+                            departmentRank: index + 1,
+                          };
+                        } catch (err) {
+                          return {
+                            id: student.ubysId,
+                            name: `${student.firstName} ${student.lastName}`,
+                            studentNo: student.additionalInfo.studentNo,
+                            gpa: 0,
+                            advisorName: 'Unknown',
+                            advisorUbysId: student.additionalInfo.advisorUbysId,
+                            approvalDate: "N/A",
+                            departmentRank: index + 1,
+                          };
+                        }
+                      })
+                    );
+                  })
+                  .then(enhancedStudents => {
+                    // Sort by GPA
+                    enhancedStudents.sort((a, b) => b.gpa - a.gpa);
+                    
+                    // Reassign rank after sorting
+                    enhancedStudents.forEach((student, index) => {
+                      student.departmentRank = index + 1;
+                    });
+                    
+                    setStudents(enhancedStudents);
+                    setAdvisorApprovalsCompleted(enhancedStudents.length > 0);
+                    setLoading(false);
+                  })
+                  .catch(err => {
+                    setError('Failed to refresh department data');
+                    console.error('Department data refresh error:', err);
+                    setLoading(false);
+                  });
+              }
+            }}
+          >
+            Refresh Data
+          </Button>
         </div>
       </Card>
     </div>

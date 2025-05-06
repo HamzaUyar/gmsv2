@@ -1,9 +1,11 @@
 "use client";
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
+import { getStudents, getStudentTranscript, getDepartments, getStaff, getFaculties } from '../../lib/api';
+import { User } from '../../types';
 
 // Placeholder icons
 const UserIcon = () => <svg className="w-5 h-5 inline-block mr-2" fill="currentColor" viewBox="0 0 20 20"><path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"></path></svg>;
@@ -15,8 +17,120 @@ const EyeIcon = () => <svg className="w-4 h-4 inline-block mr-1" fill="currentCo
 
 export default function FacultySecretaryDashboard() {
   const { data: session, status } = useSession();
+  const [facultyInfo, setFacultyInfo] = useState<any>(null);
+  const [departments, setDepartments] = useState<any[]>([]);
+  const [students, setStudents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [approvalStatus, setApprovalStatus] = useState("PENDING");
+  const [departmentApprovalsCompleted, setDepartmentApprovalsCompleted] = useState(false);
 
-  if (status === "loading") {
+  useEffect(() => {
+    async function loadData() {
+      const user = session?.user as User;
+      if (user?.ubysId) {
+        setLoading(true);
+        try {
+          // Get staff to find faculty information
+          const staffData = await getStaff();
+          const currentUser = staffData.find((staff: any) => staff.ubysId === user.ubysId);
+          
+          if (currentUser && currentUser.additionalInfo?.facultyUbysId) {
+            // Get faculty information
+            const faculties = await getFaculties();
+            const facultyData = faculties.find(
+              (fac: any) => fac.ubysFacultyId === currentUser.additionalInfo.facultyUbysId
+            );
+            
+            if (facultyData) {
+              setFacultyInfo(facultyData);
+              
+              // Get departments in this faculty
+              const facultyDepartments = await getDepartments(facultyData.ubysFacultyId);
+              
+              // Enhance department data with student counts and approval status (mocked)
+              const enhancedDepartments = facultyDepartments.map((dept: any, index: number) => {
+                return {
+                  id: dept.ubysDepartmentId,
+                  name: dept.name,
+                  totalStudents: 10 + index, // Mocked student count
+                  approvalStatus: index < 2 ? "APPROVED" : "PENDING",
+                  approvalDate: index < 2 ? `2023-05-${18 - index}` : null
+                };
+              });
+              
+              setDepartments(enhancedDepartments);
+              
+              // Check if all departments have completed their approvals
+              const allApproved = enhancedDepartments.every(dept => dept.approvalStatus === "APPROVED");
+              setDepartmentApprovalsCompleted(allApproved);
+              
+              // Get students from this faculty
+              const facultyStudents = await getStudents({
+                facultyUbysId: facultyData.ubysFacultyId
+              });
+              
+              // Enhance student data with transcripts and department info
+              const enhancedStudents = await Promise.all(
+                facultyStudents.map(async (student: any, index: number) => {
+                  try {
+                    const transcript = await getStudentTranscript(student.ubysId);
+                    const studentDept = facultyDepartments.find(
+                      (dept: any) => dept.ubysDepartmentId === student.additionalInfo.departmentUbysId
+                    );
+                    
+                    return {
+                      id: student.ubysId,
+                      name: `${student.firstName} ${student.lastName}`,
+                      studentNo: student.additionalInfo.studentNo,
+                      department: studentDept ? studentDept.name : 'Unknown',
+                      departmentUbysId: student.additionalInfo.departmentUbysId,
+                      gpa: transcript?.summary?.cumulativeGpa || 0,
+                      departmentRank: index % 3 + 1, // Mocked department rank
+                      facultyRank: index + 1 // Initial faculty rank
+                    };
+                  } catch (err) {
+                    console.error(`Error fetching transcript for student ${student.ubysId}:`, err);
+                    return {
+                      id: student.ubysId,
+                      name: `${student.firstName} ${student.lastName}`,
+                      studentNo: student.additionalInfo.studentNo,
+                      department: 'Unknown',
+                      departmentUbysId: student.additionalInfo.departmentUbysId,
+                      gpa: 0,
+                      departmentRank: 0,
+                      facultyRank: index + 1
+                    };
+                  }
+                })
+              );
+              
+              // Sort by GPA for faculty ranking
+              enhancedStudents.sort((a, b) => b.gpa - a.gpa);
+              
+              // Reassign faculty rank after sorting
+              enhancedStudents.forEach((student, index) => {
+                student.facultyRank = index + 1;
+              });
+              
+              setStudents(enhancedStudents);
+            }
+          }
+        } catch (err) {
+          setError('Failed to load faculty data');
+          console.error('Faculty data loading error:', err);
+        } finally {
+          setLoading(false);
+        }
+      }
+    }
+
+    if (status === 'authenticated') {
+      loadData();
+    }
+  }, [session, status]);
+
+  if (status === "loading" || loading) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="text-lg font-semibold text-gray-600">Loading Dashboard...</div>
@@ -24,23 +138,8 @@ export default function FacultySecretaryDashboard() {
     );
   }
 
-  const user = session?.user as any;
-  const mockFacultyName = "Engineering Faculty";
-  const mockApprovalStatus: string = "PENDING";
-  const mockDepartmentApprovalsCompleted = false;
+  const user = session?.user as User;
   
-  const mockDepartments = [
-    { id: "dept1", name: "Computer Engineering", totalStudents: 12, approvalStatus: "APPROVED", approvalDate: "2023-05-18" },
-    { id: "dept2", name: "Electrical Engineering", totalStudents: 8, approvalStatus: "APPROVED", approvalDate: "2023-05-17" },
-    { id: "dept3", name: "Mechanical Engineering", totalStudents: 10, approvalStatus: "PENDING", approvalDate: null },
-  ];
-  
-  const mockStudents = [
-    { id: "student1", name: "John Student", studentNo: "202011001", gpa: 3.65, department: "Computer Engineering", departmentRank: 1, facultyRank: 1 },
-    { id: "student2", name: "Alice Smith", studentNo: "202011002", gpa: 3.42, department: "Computer Engineering", departmentRank: 2, facultyRank: 3 },
-    { id: "student3", name: "Bob Johnson", studentNo: "202011003", gpa: 3.55, department: "Electrical Engineering", departmentRank: 1, facultyRank: 2 },
-  ];
-
   return (
     <div className="space-y-8">
       <h1 className="text-3xl font-bold text-[rgb(var(--primary))]">Faculty Secretary Dashboard</h1>
@@ -58,7 +157,7 @@ export default function FacultySecretaryDashboard() {
           </div>
           <div>
             <p className="text-sm text-gray-500">Faculty</p>
-            <p className="text-lg font-medium text-gray-800">{mockFacultyName}</p>
+            <p className="text-lg font-medium text-gray-800">{facultyInfo?.name || "Loading..."}</p>
           </div>
           <div>
             <p className="text-sm text-gray-500">Role</p>
@@ -72,42 +171,59 @@ export default function FacultySecretaryDashboard() {
           <h2 className="text-2xl font-semibold text-gray-700 mb-2 sm:mb-0">Faculty Approval Status</h2>
           <div className="flex items-center">
             <div className={`w-4 h-4 rounded-full mr-2 ${
-              mockApprovalStatus === "APPROVED" ? "bg-green-500" : 
-              mockApprovalStatus === "REJECTED" ? "bg-red-500" : "bg-yellow-400"
+              approvalStatus === "APPROVED" ? "bg-green-500" : 
+              approvalStatus === "REJECTED" ? "bg-red-500" : "bg-yellow-400"
             }`}></div>
             <span className={`font-semibold text-lg ${
-              mockApprovalStatus === "APPROVED" ? "text-green-600" : 
-              mockApprovalStatus === "REJECTED" ? "text-red-600" : "text-yellow-500"
+              approvalStatus === "APPROVED" ? "text-green-600" : 
+              approvalStatus === "REJECTED" ? "text-red-600" : "text-yellow-500"
             }`}>
-              {mockApprovalStatus === "APPROVED" ? "Approved" : 
-               mockApprovalStatus === "REJECTED" ? "Rejected" : "Pending Review"}
+              {approvalStatus === "APPROVED" ? "Approved" : 
+               approvalStatus === "REJECTED" ? "Rejected" : "Pending Review"}
             </span>
           </div>
         </div>
         
         <div className="flex justify-between items-center mb-4">
           <p className="text-base text-gray-600">All department approvals completed:</p>
-          <span className={`font-semibold text-base px-3 py-1 rounded-full text-xs shadow-sm ${mockDepartmentApprovalsCompleted ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-            {mockDepartmentApprovalsCompleted ? "Yes" : "No"}
+          <span className={`font-semibold text-base px-3 py-1 rounded-full text-xs shadow-sm ${departmentApprovalsCompleted ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+            {departmentApprovalsCompleted ? "Yes" : "No"}
           </span>
         </div>
         
-        {!mockDepartmentApprovalsCompleted && (
+        {!departmentApprovalsCompleted && (
           <p className="text-sm text-gray-500 bg-gray-50 p-3 rounded-lg border border-gray-200">
             Waiting for all departments to complete their approvals before faculty approval can be finalized.
           </p>
         )}
         
-        {mockDepartmentApprovalsCompleted && mockApprovalStatus === "PENDING" && (
+        {departmentApprovalsCompleted && approvalStatus === "PENDING" && (
           <div className="mt-6 pt-4 border-t border-gray-200 flex space-x-3">
-            <Button variant="success" size="md" icon={<CheckCircleIcon />}>Approve All</Button>
-            <Button variant="danger" size="md" icon={<XCircleIcon />}>Reject All</Button>
+            <Button 
+              variant="success" 
+              size="md" 
+              icon={<CheckCircleIcon />}
+              onClick={() => setApprovalStatus("APPROVED")}
+            >
+              Approve All
+            </Button>
+            <Button 
+              variant="danger" 
+              size="md" 
+              icon={<XCircleIcon />}
+              onClick={() => setApprovalStatus("REJECTED")}
+            >
+              Reject All
+            </Button>
           </div>
         )}
       </Card>
       
       <Card>
         <h2 className="text-2xl font-semibold mb-6 text-gray-700 flex items-center"><BuildingOfficeIcon/> Department Status</h2>
+        {error && (
+          <div className="text-red-500 mb-4">{error}</div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead className="bg-gray-50">
@@ -120,25 +236,33 @@ export default function FacultySecretaryDashboard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {mockDepartments.map((dept) => (
-                <tr key={dept.id} className="hover:bg-gray-50 transition-colors duration-150">
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-700 font-medium">{dept.name}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-center">{dept.totalStudents}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-center">
-                    <span className={`px-3 py-1 rounded-full text-xs font-semibold shadow-sm ${ 
-                        dept.approvalStatus === "APPROVED" ? "bg-green-100 text-green-700" : 
-                        dept.approvalStatus === "REJECTED" ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700"
-                      }`}>
-                      {dept.approvalStatus === "APPROVED" ? "Approved" : 
-                       dept.approvalStatus === "REJECTED" ? "Rejected" : "Pending"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-600">{dept.approvalDate || "N/A"}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-center">
-                    <Button variant="outline" size="md" icon={<EyeIcon />}>View Students</Button>
+              {departments.length > 0 ? (
+                departments.map((dept) => (
+                  <tr key={dept.id} className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-700 font-medium">{dept.name}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-center">{dept.totalStudents}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                      <span className={`px-3 py-1 rounded-full text-xs font-semibold shadow-sm ${ 
+                          dept.approvalStatus === "APPROVED" ? "bg-green-100 text-green-700" : 
+                          dept.approvalStatus === "REJECTED" ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700"
+                        }`}>
+                        {dept.approvalStatus === "APPROVED" ? "Approved" : 
+                         dept.approvalStatus === "REJECTED" ? "Rejected" : "Pending"}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-600">{dept.approvalDate || "N/A"}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                      <Button variant="outline" size="sm" icon={<EyeIcon />}>View Students</Button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
+                    No departments data available
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>
@@ -160,21 +284,126 @@ export default function FacultySecretaryDashboard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {mockStudents.map((student) => (
-                <tr key={student.id} className="hover:bg-gray-50 transition-colors duration-150">
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-center font-medium">{student.facultyRank}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-700 font-medium">{student.name}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-600">{student.studentNo}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-600">{student.department}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-center">{student.departmentRank}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-center">{student.gpa.toFixed(2)}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-center">
-                    <Button variant="outline" size="md" icon={<EyeIcon />}>View Details</Button>
+              {students.length > 0 ? (
+                students.map((student) => (
+                  <tr key={student.id} className="hover:bg-gray-50 transition-colors duration-150">
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-center font-medium">{student.facultyRank}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-700 font-medium">{student.name}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-600">{student.studentNo}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-600">{student.department}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-center">{student.departmentRank}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-center">{typeof student.gpa === 'number' ? student.gpa.toFixed(2) : student.gpa}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                      <Button variant="outline" size="sm" icon={<EyeIcon />}>View Details</Button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
+                    No students data available
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
+        </div>
+        <div className="mt-4">
+          <Button 
+            variant="primary" 
+            onClick={() => {
+              setLoading(true);
+              const user = session?.user as User;
+              if (user?.ubysId) {
+                Promise.all([getStaff(), getFaculties()])
+                  .then(async ([staffData, faculties]) => {
+                    const currentUser = staffData.find((staff: any) => staff.ubysId === user.ubysId);
+                    if (currentUser && currentUser.additionalInfo?.facultyUbysId) {
+                      const facultyData = faculties.find(
+                        (fac: any) => fac.ubysFacultyId === currentUser.additionalInfo.facultyUbysId
+                      );
+                      
+                      if (facultyData) {
+                        setFacultyInfo(facultyData);
+                        
+                        // Refresh all data
+                        const [facultyDepartments, facultyStudents] = await Promise.all([
+                          getDepartments(facultyData.ubysFacultyId),
+                          getStudents({ facultyUbysId: facultyData.ubysFacultyId })
+                        ]);
+                        
+                        // Process departments
+                        const enhancedDepartments = facultyDepartments.map((dept: any, index: number) => {
+                          return {
+                            id: dept.ubysDepartmentId,
+                            name: dept.name,
+                            totalStudents: 10 + index,
+                            approvalStatus: index < 2 ? "APPROVED" : "PENDING",
+                            approvalDate: index < 2 ? `2023-05-${18 - index}` : null
+                          };
+                        });
+                        
+                        setDepartments(enhancedDepartments);
+                        setDepartmentApprovalsCompleted(enhancedDepartments.every(dept => dept.approvalStatus === "APPROVED"));
+                        
+                        // Process students
+                        const enhancedStudents = await Promise.all(
+                          facultyStudents.map(async (student: any, index: number) => {
+                            try {
+                              const transcript = await getStudentTranscript(student.ubysId);
+                              const studentDept = facultyDepartments.find(
+                                (dept: any) => dept.ubysDepartmentId === student.additionalInfo.departmentUbysId
+                              );
+                              
+                              return {
+                                id: student.ubysId,
+                                name: `${student.firstName} ${student.lastName}`,
+                                studentNo: student.additionalInfo.studentNo,
+                                department: studentDept ? studentDept.name : 'Unknown',
+                                departmentUbysId: student.additionalInfo.departmentUbysId,
+                                gpa: transcript?.summary?.cumulativeGpa || 0,
+                                departmentRank: index % 3 + 1,
+                                facultyRank: index + 1
+                              };
+                            } catch (err) {
+                              return {
+                                id: student.ubysId,
+                                name: `${student.firstName} ${student.lastName}`,
+                                studentNo: student.additionalInfo.studentNo,
+                                department: 'Unknown',
+                                departmentUbysId: student.additionalInfo.departmentUbysId,
+                                gpa: 0,
+                                departmentRank: 0,
+                                facultyRank: index + 1
+                              };
+                            }
+                          })
+                        );
+                        
+                        // Sort by GPA
+                        enhancedStudents.sort((a, b) => b.gpa - a.gpa);
+                        
+                        // Reassign faculty rank
+                        enhancedStudents.forEach((student, index) => {
+                          student.facultyRank = index + 1;
+                        });
+                        
+                        setStudents(enhancedStudents);
+                      }
+                    }
+                  })
+                  .catch(err => {
+                    setError('Failed to refresh faculty data');
+                    console.error('Faculty data refresh error:', err);
+                  })
+                  .finally(() => {
+                    setLoading(false);
+                  });
+              }
+            }}
+          >
+            Refresh Data
+          </Button>
         </div>
       </Card>
     </div>

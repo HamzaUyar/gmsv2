@@ -1,7 +1,10 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
+import { SessionUser, UserRole } from '../../types';
+import { getStudents, getStudentTranscript, getDepartments, getFaculties } from '../../lib/api';
 
 // Placeholder icons - replace with actual icons from a library like react-icons
 const UserIcon = () => <svg className="w-5 h-5 inline-block mr-2" fill="currentColor" viewBox="0 0 20 20"><path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"></path></svg>;
@@ -17,6 +20,373 @@ const DownloadIcon = () => <svg className="w-4 h-4 inline-block mr-1" fill="curr
 export default function StudentAffairsDashboard() {
   const { data: session, status } = useSession();
   const [activeTab, setActiveTab] = useState<'data' | 'transcripts' | 'documents'>('data');
+  const router = useRouter();
+  
+  // State for API data
+  const [faculties, setFaculties] = useState<any[]>([]);
+  const [students, setStudents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [approvalStatus, setApprovalStatus] = useState("PENDING");
+  const [facultyApprovalsCompleted, setFacultyApprovalsCompleted] = useState(false);
+  const [documentsGenerated, setDocumentsGenerated] = useState(false);
+  
+  // New state for tracking data pull status
+  const [dataStatus, setDataStatus] = useState({
+    users: false,
+    academicStructure: false,
+    transcripts: false
+  });
+
+  // New state for documents
+  const [documents, setDocuments] = useState<any[]>([]);
+
+  // Check session status and redirect if needed
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push('/login');
+    } else if (status === "authenticated") {
+      const user = session.user as SessionUser;
+      if (user?.role !== "STUDENT_AFFAIRS") {
+        // If user is authenticated but doesn't have the correct role
+        const rolePathMapping: {[key in UserRole]: string} = {
+          STUDENT: "/student",
+          ADVISOR: "/advisor",
+          DEPARTMENT_SECRETARY: "/department",
+          FACULTY_SECRETARY: "/faculty",
+          STUDENT_AFFAIRS: "/student-affairs",
+        };
+        
+        const correctPath = user?.role ? rolePathMapping[user.role] : "/";
+        router.push(correctPath);
+      }
+    }
+  }, [status, session, router]);
+
+  // Load data from API
+  useEffect(() => {
+    async function loadData() {
+      if (status === 'authenticated') {
+        setLoading(true);
+        try {
+          // Get faculties
+          const facultiesData = await getFaculties();
+          
+          // Enhance faculty data with approval status (mocked)
+          const enhancedFaculties = facultiesData.map((fac: any, index: number) => {
+            return {
+              id: fac.ubysFacultyId,
+              name: fac.name,
+              totalStudents: 20 + (index * 5), // Mocked student count
+              approvalStatus: index < 2 ? "APPROVED" : "PENDING",
+              approvalDate: index < 2 ? `2023-05-${20 - index}` : null
+            };
+          });
+          
+          setFaculties(enhancedFaculties);
+          
+          // Check if all faculties have completed their approvals
+          const allApproved = enhancedFaculties.every((fac: any) => fac.approvalStatus === "APPROVED");
+          setFacultyApprovalsCompleted(allApproved);
+          
+          // Get all students
+          const studentsData = await getStudents();
+          
+          // Enhance student data with transcripts and department/faculty info
+          const enhancedStudents = await Promise.all(
+            studentsData.map(async (student: any, index: number) => {
+              try {
+                const transcript = await getStudentTranscript(student.ubysId);
+                const studentFaculty = facultiesData.find(
+                  (fac: any) => fac.ubysFacultyId === student.additionalInfo.facultyUbysId
+                );
+                
+                // Get departments to find the student's department
+                const departments = await getDepartments(student.additionalInfo.facultyUbysId);
+                const studentDept = departments.find(
+                  (dept: any) => dept.ubysDepartmentId === student.additionalInfo.departmentUbysId
+                );
+                
+                return {
+                  id: student.ubysId,
+                  name: `${student.firstName} ${student.lastName}`,
+                  studentNo: student.additionalInfo.studentNo,
+                  faculty: studentFaculty ? studentFaculty.name : 'Unknown',
+                  department: studentDept ? studentDept.name : 'Unknown',
+                  gpa: transcript?.summary?.cumulativeGpa || 0,
+                  facultyRank: index % 3 + 1, // Mocked faculty rank
+                  universityRank: index + 1 // Initial university rank
+                };
+              } catch (err) {
+                console.error(`Error fetching data for student ${student.ubysId}:`, err);
+                return {
+                  id: student.ubysId,
+                  name: `${student.firstName} ${student.lastName}`,
+                  studentNo: student.additionalInfo.studentNo,
+                  faculty: 'Unknown',
+                  department: 'Unknown',
+                  gpa: 0,
+                  facultyRank: 0,
+                  universityRank: index + 1
+                };
+              }
+            })
+          );
+          
+          // Sort by GPA for university ranking
+          enhancedStudents.sort((a, b) => b.gpa - a.gpa);
+          
+          // Reassign university rank after sorting
+          enhancedStudents.forEach((student, index) => {
+            student.universityRank = index + 1;
+          });
+          
+          setStudents(enhancedStudents);
+          
+          // Mock documents data based on top students
+          const mockDocuments = enhancedStudents.slice(0, 3).flatMap(student => [
+            { 
+              id: `doc-diploma-${student.id}`, 
+              studentName: student.name, 
+              studentNo: student.studentNo, 
+              type: "DIPLOMA", 
+              documentNumber: `DIP-2023-${student.universityRank.toString().padStart(3, '0')}`, 
+              generatedAt: "2023-05-22", 
+              status: "PENDING" 
+            },
+            { 
+              id: `doc-cert-${student.id}`, 
+              studentName: student.name, 
+              studentNo: student.studentNo, 
+              type: "CERTIFICATE", 
+              certificateType: student.universityRank === 1 ? "HIGH_HONOUR" : "HONOUR", 
+              documentNumber: `CERT-2023-${student.universityRank.toString().padStart(3, '0')}`, 
+              generatedAt: "2023-05-22", 
+              status: "PENDING" 
+            }
+          ]);
+          
+        } catch (err) {
+          setError('Failed to load data');
+          console.error('Data loading error:', err);
+        } finally {
+          setLoading(false);
+        }
+      }
+    }
+
+    // Only load data if we have already pulled the data
+    if (dataStatus.users && dataStatus.academicStructure && dataStatus.transcripts) {
+      loadData();
+    }
+  }, [status, dataStatus]);
+
+  // Function to pull user data
+  const pullUserData = async () => {
+    setLoading(true);
+    try {
+      // Make API calls to get user data
+      const studentsData = await getStudents();
+      const staffData = await fetch('/api/mock/ubys/users/staff').then(res => res.json());
+      
+      console.log(`Pulled data for ${studentsData.length} students and ${staffData.length} staff members`);
+      
+      // Mark user data as pulled
+      setDataStatus(prev => ({...prev, users: true}));
+      
+      // Show success message
+      setError(null);
+    } catch (err) {
+      setError('Failed to pull user data');
+      console.error('User data pull error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Function to pull academic structure data
+  const pullAcademicStructure = async () => {
+    setLoading(true);
+    try {
+      // Make API calls to get academic structure data
+      const facultiesData = await getFaculties();
+      
+      // Get all departments across all faculties
+      let allDepartments: any[] = [];
+      for (const faculty of facultiesData) {
+        const facultyDepartments = await getDepartments(faculty.ubysFacultyId);
+        allDepartments = [...allDepartments, ...facultyDepartments];
+      }
+      
+      console.log(`Pulled data for ${facultiesData.length} faculties and ${allDepartments.length} departments`);
+      
+      // Mark academic structure as pulled
+      setDataStatus(prev => ({...prev, academicStructure: true}));
+      
+      // Show success message
+      setError(null);
+    } catch (err) {
+      setError('Failed to pull academic structure data');
+      console.error('Academic structure pull error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Function to pull transcript data
+  const pullTranscriptData = async () => {
+    setLoading(true);
+    try {
+      // Get all students first
+      const studentsData = await getStudents();
+      
+      // Filter for senior students (class level 4)
+      const seniorStudents = studentsData.filter(
+        (student: any) => student.additionalInfo.classLevel === 4
+      );
+      
+      // Pull transcripts for all senior students
+      const transcripts = await Promise.all(
+        seniorStudents.map(async (student: any) => {
+          try {
+            return await getStudentTranscript(student.ubysId);
+          } catch (err) {
+            console.error(`Error fetching transcript for student ${student.ubysId}:`, err);
+            return null;
+          }
+        })
+      );
+      
+      const validTranscripts = transcripts.filter(t => t !== null);
+      console.log(`Pulled ${validTranscripts.length} transcripts for ${seniorStudents.length} senior students`);
+      
+      // Mark transcripts as pulled
+      setDataStatus(prev => ({...prev, transcripts: true}));
+      
+      // Show success message
+      setError(null);
+    } catch (err) {
+      setError('Failed to pull transcript data');
+      console.error('Transcript data pull error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Function to generate documents
+  const generateDocuments = async () => {
+    setLoading(true);
+    try {
+      if (!students || students.length === 0) {
+        throw new Error("No student data available to generate documents");
+      }
+      
+      // Sort students by GPA for proper ranking
+      const rankedStudents = [...students].sort((a, b) => b.gpa - a.gpa);
+      
+      // Generate mock documents for eligible students
+      const eligibleStudents = rankedStudents.filter(student => 
+        student.gpa >= 2.0 // Basic eligibility criteria
+      );
+      
+      // Generate diplomas and certificates
+      const generatedDocuments = eligibleStudents.flatMap(student => {
+        const documents = [];
+        
+        // Add diploma for all eligible students
+        documents.push({
+          id: `diploma-${student.id}`,
+          studentName: student.name,
+          studentNo: student.studentNo,
+          type: "DIPLOMA",
+          documentNumber: `DIP-2023-${student.universityRank.toString().padStart(3, '0')}`,
+          generatedAt: new Date().toISOString().split('T')[0],
+          status: "PENDING"
+        });
+        
+        // Add honor certificate for high GPA students
+        if (student.gpa >= 3.5) {
+          documents.push({
+            id: `cert-${student.id}`,
+            studentName: student.name,
+            studentNo: student.studentNo,
+            type: "CERTIFICATE",
+            certificateType: student.gpa >= 3.75 ? "HIGH_HONOUR" : "HONOUR",
+            documentNumber: `CERT-2023-${student.universityRank.toString().padStart(3, '0')}`,
+            generatedAt: new Date().toISOString().split('T')[0],
+            status: "PENDING"
+          });
+        }
+        
+        return documents;
+      });
+      
+      setDocuments(generatedDocuments);
+      setDocumentsGenerated(true);
+      setError(null);
+      
+      console.log(`Generated ${generatedDocuments.length} documents for ${eligibleStudents.length} students`);
+    } catch (err) {
+      setError('Failed to generate documents');
+      console.error('Document generation error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Function to approve a document
+  const approveDocument = (documentId: string) => {
+    setDocuments(prevDocs => 
+      prevDocs.map(doc => 
+        doc.id === documentId ? { ...doc, status: "APPROVED" } : doc
+      )
+    );
+  };
+  
+  // Function to download a document (mock function)
+  const downloadDocument = (documentId: string) => {
+    console.log(`Downloading document ${documentId}`);
+    // In a real app, this would trigger a download
+    alert(`Document ${documentId} would be downloaded in a real application`);
+  };
+
+  // Function to approve all transcripts
+  const approveAllTranscripts = () => {
+    setLoading(true);
+    try {
+      // Update approval status
+      setApprovalStatus("APPROVED");
+      
+      // In a real application, this would make API calls to update the status in the database
+      console.log("All transcripts approved at university level");
+      
+      setError(null);
+    } catch (err) {
+      setError('Failed to approve transcripts');
+      console.error('Transcript approval error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Function to reject all transcripts
+  const rejectAllTranscripts = () => {
+    setLoading(true);
+    try {
+      // Update approval status
+      setApprovalStatus("REJECTED");
+      
+      // In a real application, this would make API calls to update the status in the database
+      console.log("All transcripts rejected at university level");
+      
+      setError(null);
+    } catch (err) {
+      setError('Failed to reject transcripts');
+      console.error('Transcript rejection error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (status === "loading") {
     return (
@@ -26,29 +396,23 @@ export default function StudentAffairsDashboard() {
     );
   }
 
-  const user = session?.user as any;
-  const mockApprovalStatus: string = "PENDING";
-  const mockFacultyApprovalsCompleted = false;
-  const mockDocumentsGenerated = false;
-  
-  const mockFaculties = [
-    { id: "fac1", name: "Engineering Faculty", totalStudents: 30, approvalStatus: "APPROVED", approvalDate: "2023-05-20" },
-    { id: "fac2", name: "Business Faculty", totalStudents: 25, approvalStatus: "APPROVED", approvalDate: "2023-05-19" },
-    { id: "fac3", name: "Medicine Faculty", totalStudents: 20, approvalStatus: "PENDING", approvalDate: null },
-  ];
-  
-  const mockStudents = [
-    { id: "student1", name: "John Student", studentNo: "202011001", gpa: 3.65, faculty: "Engineering Faculty", department: "Computer Engineering", facultyRank: 1, universityRank: 1 },
-    { id: "student2", name: "Alice Smith", studentNo: "202011002", gpa: 3.42, faculty: "Engineering Faculty", department: "Computer Engineering", facultyRank: 3, universityRank: 5 },
-    { id: "student3", name: "Bob Johnson", studentNo: "202011003", gpa: 3.55, faculty: "Business Faculty", department: "Business Administration", facultyRank: 1, universityRank: 2 },
-  ];
-  
-  const mockDocuments = [
-    { id: "doc1", studentName: "John Student", studentNo: "202011001", type: "DIPLOMA", documentNumber: "DIP-2023-001", generatedAt: "2023-05-22", status: "PENDING" },
-    { id: "doc2", studentName: "John Student", studentNo: "202011001", type: "CERTIFICATE", certificateType: "HIGH_HONOUR", documentNumber: "CERT-2023-001", generatedAt: "2023-05-22", status: "PENDING" },
-    { id: "doc3", studentName: "Alice Smith", studentNo: "202011002", type: "DIPLOMA", documentNumber: "DIP-2023-002", generatedAt: "2023-05-22", status: "PENDING" },
-  ];
+  // Safety check - if no session or wrong role, show error
+  if (!session?.user) {
+    return (
+      <div className="flex justify-center items-center h-64 flex-col">
+        <div className="text-lg font-semibold text-red-600 mb-4">Session not available</div>
+        <button 
+          onClick={() => router.push('/login')}
+          className="bg-[rgb(var(--primary))] hover:bg-opacity-85 text-white font-semibold py-2 px-5 rounded-lg"
+        >
+          Return to Login
+        </button>
+      </div>
+    );
+  }
 
+  const user = session.user as SessionUser;
+  
   const renderSectionTitle = (title: string, icon?: React.ReactNode) => (
     <h2 className="text-2xl font-semibold mb-6 text-gray-700 flex items-center">
       {icon} {title}
@@ -83,7 +447,7 @@ export default function StudentAffairsDashboard() {
     let colorStyle = "";
     switch (variant) {
       case 'primary':
-        colorStyle = "bg-[rgb(var(--iyte-red))] hover:bg-opacity-85 text-white";
+        colorStyle = "bg-[rgb(var(--primary))] hover:bg-opacity-85 text-white";
         break;
       case 'secondary':
         colorStyle = "bg-gray-200 hover:bg-gray-300 text-gray-800";
@@ -100,7 +464,7 @@ export default function StudentAffairsDashboard() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-3xl font-bold text-[rgb(var(--iyte-red))]">Student Affairs Dashboard</h1>
+      <h1 className="text-3xl font-bold text-[rgb(var(--primary))]">Student Affairs Dashboard</h1>
       
       {renderInfoCard(
         <>
@@ -127,7 +491,7 @@ export default function StudentAffairsDashboard() {
               onClick={() => setActiveTab(item.tab as any)}
               className={`whitespace-nowrap pb-4 px-1 border-b-2 font-semibold text-base flex items-center space-x-2 ${
                 activeTab === item.tab
-                  ? 'border-[rgb(var(--iyte-red))] text-[rgb(var(--iyte-red))]'
+                  ? 'border-[rgb(var(--primary))] text-[rgb(var(--primary))]'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
@@ -142,17 +506,48 @@ export default function StudentAffairsDashboard() {
           {renderSectionTitle("System Initialization", <DatabaseIcon />)}
           <div className="space-y-6">
             {[ 
-              { title: "User Data", description: "Pull user data from UBYS including students, advisors, and secretaries.", buttonText: "Pull User Data" },
-              { title: "Academic Structure", description: "Pull faculty and department data from UBYS.", buttonText: "Pull Academic Structure" },
-              { title: "Transcripts", description: "Pull transcript data for senior students.", buttonText: "Pull Transcript Data" }
+              { 
+                title: "User Data", 
+                description: "Pull user data from UBYS including students, advisors, and secretaries.", 
+                buttonText: "Pull User Data",
+                action: pullUserData,
+                isComplete: dataStatus.users
+              },
+              { 
+                title: "Academic Structure", 
+                description: "Pull faculty and department data from UBYS.", 
+                buttonText: "Pull Academic Structure",
+                action: pullAcademicStructure,
+                isComplete: dataStatus.academicStructure
+              },
+              { 
+                title: "Transcripts", 
+                description: "Pull transcript data for senior students.", 
+                buttonText: "Pull Transcript Data",
+                action: pullTranscriptData,
+                isComplete: dataStatus.transcripts
+              }
             ].map(item => (
               <div key={item.title} className="bg-gray-50 p-6 rounded-lg border border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center">
                 <div>
-                  <h3 className="font-semibold text-lg text-gray-800 mb-1">{item.title}</h3>
+                  <div className="flex items-center">
+                    <h3 className="font-semibold text-lg text-gray-800 mb-1">{item.title}</h3>
+                    {item.isComplete && (
+                      <span className="ml-2 bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs font-semibold">
+                        Completed
+                      </span>
+                    )}
+                  </div>
                   <p className="text-gray-600 text-sm mb-3 sm:mb-0">{item.description}</p>
                 </div>
                 <div className="mt-3 sm:mt-0 sm:ml-4 flex-shrink-0">
-                  {renderButton(item.buttonText, () => {}, 'primary')}
+                  {renderButton(
+                    item.buttonText, 
+                    item.action, 
+                    item.isComplete ? 'secondary' : 'primary',
+                    undefined,
+                    false
+                  )}
                 </div>
               </div>
             ))}
@@ -168,30 +563,30 @@ export default function StudentAffairsDashboard() {
                 <h2 className="text-2xl font-semibold text-gray-700 mb-2 sm:mb-0">University Approval Status</h2>
                 <div className="flex items-center">
                   <div className={`w-4 h-4 rounded-full mr-2 ${
-                    mockApprovalStatus === "APPROVED" ? "bg-green-500" : 
-                    mockApprovalStatus === "REJECTED" ? "bg-red-500" : "bg-yellow-400"}`}></div>
+                    approvalStatus === "APPROVED" ? "bg-green-500" : 
+                    approvalStatus === "REJECTED" ? "bg-red-500" : "bg-yellow-400"}`}></div>
                   <span className={`font-semibold text-lg ${
-                    mockApprovalStatus === "APPROVED" ? "text-green-600" : 
-                    mockApprovalStatus === "REJECTED" ? "text-red-600" : "text-yellow-500"}`}>
-                    {mockApprovalStatus === "APPROVED" ? "Approved" : mockApprovalStatus === "REJECTED" ? "Rejected" : "Pending Review"}
+                    approvalStatus === "APPROVED" ? "text-green-600" : 
+                    approvalStatus === "REJECTED" ? "text-red-600" : "text-yellow-500"}`}>
+                    {approvalStatus === "APPROVED" ? "Approved" : approvalStatus === "REJECTED" ? "Rejected" : "Pending Review"}
                   </span>
                 </div>
               </div>
               <div className="flex justify-between items-center mb-4">
                 <p className="text-base text-gray-600">All faculty approvals completed:</p>
-                <span className={`font-semibold text-base px-3 py-1 rounded-full text-xs shadow-sm ${mockFacultyApprovalsCompleted ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                  {mockFacultyApprovalsCompleted ? "Yes" : "No"}
+                <span className={`font-semibold text-base px-3 py-1 rounded-full text-xs shadow-sm ${facultyApprovalsCompleted ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                  {facultyApprovalsCompleted ? "Yes" : "No"}
                 </span>
               </div>
-              {!mockFacultyApprovalsCompleted && (
+              {!facultyApprovalsCompleted && (
                 <p className="text-sm text-gray-500 bg-gray-50 p-3 rounded-lg border border-gray-200">
                   Waiting for all faculties to complete their approvals before university approval can be finalized.
                 </p>
               )}
-              {mockFacultyApprovalsCompleted && mockApprovalStatus === "PENDING" && (
+              {facultyApprovalsCompleted && approvalStatus === "PENDING" && (
                 <div className="mt-6 pt-4 border-t border-gray-200 flex space-x-3">
-                  {renderButton("Approve All Transcripts", () => {}, 'success', <CheckCircleIcon />)}
-                  {renderButton("Reject All", () => {}, 'danger', <XCircleIcon />)}
+                  {renderButton("Approve All Transcripts", approveAllTranscripts, 'success', <CheckCircleIcon />)}
+                  {renderButton("Reject All", rejectAllTranscripts, 'danger', <XCircleIcon />)}
                 </div>
               )}
             </>
@@ -201,7 +596,7 @@ export default function StudentAffairsDashboard() {
               {renderSectionTitle("Faculty Status", <AcademicCapIcon />)}
               {renderTable(
                 ["Faculty", "Total Students", "Status", "Approval Date", "Actions"],
-                mockFaculties.map((fac) => (
+                faculties.map((fac) => (
                   <tr key={fac.id} className="hover:bg-gray-50 transition-colors duration-150">
                     <td className="px-6 py-4 whitespace-nowrap text-gray-700 font-medium">{fac.name}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-center">{fac.totalStudents}</td>
@@ -226,7 +621,7 @@ export default function StudentAffairsDashboard() {
               {renderSectionTitle("University Ranking of Students", <AcademicCapIcon />)}
               {renderTable(
                 ["Uni. Rank", "Name", "Student No", "Faculty", "Dept.", "GPA", "Actions"],
-                mockStudents.map((student) => (
+                students.map((student) => (
                   <tr key={student.id} className="hover:bg-gray-50 transition-colors duration-150">
                     <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-center font-medium">{student.universityRank}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-gray-700 font-medium">{student.name}</td>
@@ -247,24 +642,24 @@ export default function StudentAffairsDashboard() {
 
       {activeTab === 'documents' && (
         <>
-         {renderInfoCard(
+          {renderInfoCard(
             <>
               <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-6 pb-4 border-b border-gray-200">
-                 <h2 className="text-2xl font-semibold text-gray-700 mb-2 sm:mb-0">Document Generation & Approval</h2>
-                 <div className="flex items-center">
-                    <div className={`w-4 h-4 rounded-full mr-2 ${mockDocumentsGenerated ? "bg-green-500" : "bg-yellow-400"}`}></div>
-                    <span className={`font-semibold text-lg ${mockDocumentsGenerated ? "text-green-600" : "text-yellow-500"}`}>
-                        {mockDocumentsGenerated ? "All Generated & Approved" : "Pending Generation / Approval"}
-                    </span>
+                <h2 className="text-2xl font-semibold text-gray-700 mb-2 sm:mb-0">Document Generation & Approval</h2>
+                <div className="flex items-center">
+                  <div className={`w-4 h-4 rounded-full mr-2 ${documentsGenerated ? "bg-green-500" : "bg-yellow-400"}`}></div>
+                  <span className={`font-semibold text-lg ${documentsGenerated ? "text-green-600" : "text-yellow-500"}`}>
+                    {documentsGenerated ? "All Generated & Approved" : "Pending Generation / Approval"}
+                  </span>
                 </div>
               </div>
               <p className="text-base text-gray-600 mb-4">Status of diploma and certificate generation for all approved students.</p>
-              {!mockDocumentsGenerated && mockFacultyApprovalsCompleted && mockApprovalStatus === "APPROVED" && (
+              {!documentsGenerated && facultyApprovalsCompleted && approvalStatus === "APPROVED" && (
                 <div className="mt-6 pt-4 border-t border-gray-200">
-                    {renderButton("Generate All Documents", () => {}, 'primary', <DocumentTextIcon />)}
+                  {renderButton("Generate All Documents", generateDocuments, 'primary', <DocumentTextIcon />)}
                 </div>
               )}
-               {mockDocumentsGenerated && (
+              {documentsGenerated && (
                 <p className="text-sm text-green-600 bg-green-50 p-3 rounded-lg border border-green-200">
                   All necessary documents have been generated and approved.
                 </p>
@@ -274,423 +669,39 @@ export default function StudentAffairsDashboard() {
           {renderInfoCard(
             <>
               {renderSectionTitle("Generated Documents", <DocumentTextIcon />)}
-              {renderTable(
-                ["Student Name", "Student No", "Doc. Type", "Doc. No", "Generated At", "Status", "Actions"],
-                mockDocuments.map((doc) => (
-                  <tr key={doc.id} className="hover:bg-gray-50 transition-colors duration-150">
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-700 font-medium">{doc.studentName}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-600">{doc.studentNo}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-600">
+              {documents.length > 0 ? (
+                renderTable(
+                  ["Student Name", "Student No", "Doc. Type", "Doc. No", "Generated At", "Status", "Actions"],
+                  documents.map((doc) => (
+                    <tr key={doc.id} className="hover:bg-gray-50 transition-colors duration-150">
+                      <td className="px-6 py-4 whitespace-nowrap text-gray-700 font-medium">{doc.studentName}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-gray-600">{doc.studentNo}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-gray-600">
                         {doc.type === 'CERTIFICATE' ? `${doc.type} (${doc.certificateType})` : doc.type}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-600">{doc.documentNumber}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-center">{doc.generatedAt}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <span className={`px-3 py-1 rounded-full text-xs font-semibold shadow-sm ${ 
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-gray-600">{doc.documentNumber}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-center">{doc.generatedAt}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <span className={`px-3 py-1 rounded-full text-xs font-semibold shadow-sm ${ 
                           doc.status === "APPROVED" ? "bg-green-100 text-green-700" : 
                           doc.status === "REJECTED" ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700"}`}>
-                        {doc.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2 text-center">
-                      {renderButton("View", () => {}, 'primary', <EyeIcon />)}
-                      {doc.status === "PENDING" && renderButton("Approve", () => {}, 'success', <CheckCircleIcon />)}
-                      {renderButton("Download", () => {}, 'secondary', <DownloadIcon />)}
-                    </td>
-                  </tr>
-                ))
+                          {doc.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2 text-center">
+                        {renderButton("View", () => {}, 'primary', <EyeIcon />)}
+                        {doc.status === "PENDING" && renderButton("Approve", () => approveDocument(doc.id), 'success', <CheckCircleIcon />)}
+                        {renderButton("Download", () => downloadDocument(doc.id), 'secondary', <DownloadIcon />)}
+                      </td>
+                    </tr>
+                  ))
+                )
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  {documentsGenerated ? "Loading documents..." : "No documents have been generated yet"}
+                </div>
               )}
             </>
-          )}
-        </>
-    {
-      id: "fac1",
-      name: "Engineering Faculty",
-      totalStudents: 30,
-      approvalStatus: "APPROVED",
-      approvalDate: "2023-05-20",
-    },
-    {
-      id: "fac2",
-      name: "Business Faculty",
-      totalStudents: 25,
-      approvalStatus: "APPROVED",
-      approvalDate: "2023-05-19",
-    },
-    {
-      id: "fac3",
-      name: "Medicine Faculty",
-      totalStudents: 20,
-      approvalStatus: "PENDING",
-      approvalDate: null,
-    },
-  ];
-  
-  // Mock student data for university level
-  const mockStudents = [
-    {
-      id: "student1",
-      name: "John Student",
-      studentNo: "202011001",
-      gpa: 3.65,
-      faculty: "Engineering Faculty",
-      department: "Computer Engineering",
-      facultyRank: 1,
-      universityRank: 1,
-    },
-    {
-      id: "student2",
-      name: "Alice Smith",
-      studentNo: "202011002",
-      gpa: 3.42,
-      faculty: "Engineering Faculty",
-      department: "Computer Engineering",
-      facultyRank: 3,
-      universityRank: 5,
-    },
-    {
-      id: "student3",
-      name: "Bob Johnson",
-      studentNo: "202011003",
-      gpa: 3.55,
-      faculty: "Business Faculty",
-      department: "Business Administration",
-      facultyRank: 1,
-      universityRank: 2,
-    },
-  ];
-  
-  // Mock document data
-  const mockDocuments = [
-    {
-      id: "doc1",
-      studentName: "John Student",
-      studentNo: "202011001",
-      type: "DIPLOMA",
-      documentNumber: "DIP-2023-001",
-      generatedAt: "2023-05-22",
-      status: "PENDING",
-    },
-    {
-      id: "doc2",
-      studentName: "John Student",
-      studentNo: "202011001",
-      type: "CERTIFICATE",
-      certificateType: "HIGH_HONOUR",
-      documentNumber: "CERT-2023-001",
-      generatedAt: "2023-05-22",
-      status: "PENDING",
-    },
-    {
-      id: "doc3",
-      studentName: "Alice Smith",
-      studentNo: "202011002",
-      type: "DIPLOMA",
-      documentNumber: "DIP-2023-002",
-      generatedAt: "2023-05-22",
-      status: "PENDING",
-    },
-  ];
-
-  return (
-    <div>
-      <h1 className="text-2xl font-bold mb-6">Student Affairs Dashboard</h1>
-      
-      <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-        <h2 className="text-xl font-semibold mb-4">Your Information</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <p className="text-gray-600">Name</p>
-            <p className="font-medium">{user?.firstName} {user?.lastName}</p>
-          </div>
-          <div>
-            <p className="text-gray-600">Email</p>
-            <p className="font-medium">{user?.email}</p>
-          </div>
-          <div>
-            <p className="text-gray-600">UBYS ID</p>
-            <p className="font-medium">{user?.ubysId}</p>
-          </div>
-          <div>
-            <p className="text-gray-600">Role</p>
-            <p className="font-medium">{user?.role}</p>
-          </div>
-        </div>
-      </div>
-      
-      {/* Tabs */}
-      <div className="mb-6">
-        <div className="flex border-b">
-          <button
-            className={`px-4 py-2 font-medium ${
-              activeTab === 'data' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'
-            }`}
-            onClick={() => setActiveTab('data')}
-          >
-            System Data
-          </button>
-          <button
-            className={`px-4 py-2 font-medium ${
-              activeTab === 'transcripts' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'
-            }`}
-            onClick={() => setActiveTab('transcripts')}
-          >
-            Transcript Approval
-          </button>
-          <button
-            className={`px-4 py-2 font-medium ${
-              activeTab === 'documents' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'
-            }`}
-            onClick={() => setActiveTab('documents')}
-          >
-            Document Approval
-          </button>
-        </div>
-      </div>
-      
-      {/* System Data Tab */}
-      {activeTab === 'data' && (
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">System Initialization</h2>
-          
-          <div className="space-y-4">
-            <div className="p-4 border rounded-md">
-              <h3 className="font-medium mb-2">User Data</h3>
-              <p className="text-gray-600 mb-3">Pull user data from UBYS including students, advisors, and secretaries.</p>
-              <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md">
-                Pull User Data
-              </button>
-            </div>
-            
-            <div className="p-4 border rounded-md">
-              <h3 className="font-medium mb-2">Academic Structure</h3>
-              <p className="text-gray-600 mb-3">Pull faculty and department data from UBYS.</p>
-              <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md">
-                Pull Academic Structure
-              </button>
-            </div>
-            
-            <div className="p-4 border rounded-md">
-              <h3 className="font-medium mb-2">Transcripts</h3>
-              <p className="text-gray-600 mb-3">Pull transcript data for senior students.</p>
-              <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md">
-                Pull Transcript Data
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {/* Transcript Approval Tab */}
-      {activeTab === 'transcripts' && (
-        <>
-          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">University Approval Status</h2>
-              <div className="flex items-center">
-                <div className={`w-3 h-3 rounded-full mr-2 ${
-                  mockApprovalStatus === "APPROVED" ? "bg-green-500" : 
-                  mockApprovalStatus === "REJECTED" ? "bg-red-500" : "bg-yellow-500"
-                }`}></div>
-                <span className="font-medium">
-                  {mockApprovalStatus === "APPROVED" ? "Approved" : 
-                   mockApprovalStatus === "REJECTED" ? "Rejected" : "Pending"}
-                </span>
-              </div>
-            </div>
-            
-            <div className="flex justify-between items-center mb-4">
-              <p className="text-gray-600">All faculty approvals completed:</p>
-              <span className={`font-medium ${mockFacultyApprovalsCompleted ? "text-green-600" : "text-red-600"}`}>
-                {mockFacultyApprovalsCompleted ? "Yes" : "No"}
-              </span>
-            </div>
-            
-            {!mockFacultyApprovalsCompleted && (
-              <p className="text-sm text-gray-600 mb-4">
-                Waiting for all faculties to complete their approvals before university approval can be finalized.
-              </p>
-            )}
-            
-            {mockFacultyApprovalsCompleted && mockApprovalStatus === "PENDING" && (
-              <div className="mt-4">
-                <button className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md mr-3">
-                  Approve All Transcripts
-                </button>
-                <button className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md">
-                  Reject
-                </button>
-              </div>
-            )}
-          </div>
-          
-          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-            <h2 className="text-xl font-semibold mb-4">Faculty Status</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="bg-gray-50 border-b">
-                  <tr>
-                    <th className="px-6 py-3">Faculty</th>
-                    <th className="px-6 py-3">Total Students</th>
-                    <th className="px-6 py-3">Status</th>
-                    <th className="px-6 py-3">Approval Date</th>
-                    <th className="px-6 py-3">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {mockFaculties.map((faculty) => (
-                    <tr key={faculty.id} className="border-b hover:bg-gray-50">
-                      <td className="px-6 py-4">{faculty.name}</td>
-                      <td className="px-6 py-4">{faculty.totalStudents}</td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center">
-                          <div className={`w-2 h-2 rounded-full mr-2 ${
-                            faculty.approvalStatus === "APPROVED" ? "bg-green-500" : 
-                            faculty.approvalStatus === "REJECTED" ? "bg-red-500" : "bg-yellow-500"
-                          }`}></div>
-                          <span>
-                            {faculty.approvalStatus === "APPROVED" ? "Approved" : 
-                             faculty.approvalStatus === "REJECTED" ? "Rejected" : "Pending"}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">{faculty.approvalDate || "N/A"}</td>
-                      <td className="px-6 py-4">
-                        <button className="text-blue-600 hover:text-blue-800">
-                          View Students
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-semibold mb-4">University Ranking of Students</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="bg-gray-50 border-b">
-                  <tr>
-                    <th className="px-6 py-3">Univ. Rank</th>
-                    <th className="px-6 py-3">Name</th>
-                    <th className="px-6 py-3">Student No</th>
-                    <th className="px-6 py-3">Faculty</th>
-                    <th className="px-6 py-3">Department</th>
-                    <th className="px-6 py-3">Faculty Rank</th>
-                    <th className="px-6 py-3">GPA</th>
-                    <th className="px-6 py-3">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {mockStudents.map((student) => (
-                    <tr key={student.id} className="border-b hover:bg-gray-50">
-                      <td className="px-6 py-4">{student.universityRank}</td>
-                      <td className="px-6 py-4">{student.name}</td>
-                      <td className="px-6 py-4">{student.studentNo}</td>
-                      <td className="px-6 py-4">{student.faculty}</td>
-                      <td className="px-6 py-4">{student.department}</td>
-                      <td className="px-6 py-4">{student.facultyRank}</td>
-                      <td className="px-6 py-4">{student.gpa.toFixed(2)}</td>
-                      <td className="px-6 py-4">
-                        <button className="text-blue-600 hover:text-blue-800">
-                          View Details
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      )}
-      
-      {/* Document Approval Tab */}
-      {activeTab === 'documents' && (
-        <>
-          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">Document Generation Status</h2>
-              <div>
-                {mockApprovalStatus === "APPROVED" && !mockDocumentsGenerated && (
-                  <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md">
-                    Generate Documents
-                  </button>
-                )}
-                {mockDocumentsGenerated && (
-                  <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">
-                    Documents Generated
-                  </span>
-                )}
-              </div>
-            </div>
-            
-            <p className="text-gray-600 mb-4">
-              {mockApprovalStatus !== "APPROVED" 
-                ? "Transcript approval must be completed before documents can be generated."
-                : mockDocumentsGenerated
-                  ? "All documents have been generated and are ready for approval."
-                  : "Transcripts have been approved. Documents can now be generated."
-              }
-            </p>
-          </div>
-          
-          {mockDocumentsGenerated && (
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold mb-4">Documents Pending Approval</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead className="bg-gray-50 border-b">
-                    <tr>
-                      <th className="px-6 py-3">Student</th>
-                      <th className="px-6 py-3">Student No</th>
-                      <th className="px-6 py-3">Document Type</th>
-                      <th className="px-6 py-3">Document Number</th>
-                      <th className="px-6 py-3">Generated At</th>
-                      <th className="px-6 py-3">Status</th>
-                      <th className="px-6 py-3">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {mockDocuments.map((doc) => (
-                      <tr key={doc.id} className="border-b hover:bg-gray-50">
-                        <td className="px-6 py-4">{doc.studentName}</td>
-                        <td className="px-6 py-4">{doc.studentNo}</td>
-                        <td className="px-6 py-4">
-                          {doc.type === "CERTIFICATE" 
-                            ? `${doc.certificateType} Certificate` 
-                            : "Diploma"}
-                        </td>
-                        <td className="px-6 py-4">{doc.documentNumber}</td>
-                        <td className="px-6 py-4">{doc.generatedAt}</td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center">
-                            <div className={`w-2 h-2 rounded-full mr-2 ${
-                              doc.status === "APPROVED" ? "bg-green-500" : 
-                              doc.status === "REJECTED" ? "bg-red-500" : "bg-yellow-500"
-                            }`}></div>
-                            <span>
-                              {doc.status === "APPROVED" ? "Approved" : 
-                               doc.status === "REJECTED" ? "Rejected" : "Pending"}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <button className="text-blue-600 hover:text-blue-800 mr-2">
-                            Preview
-                          </button>
-                          <button className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm">
-                            Approve
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
           )}
         </>
       )}

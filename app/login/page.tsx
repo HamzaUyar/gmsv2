@@ -1,17 +1,52 @@
 "use client";
 
-import { useState } from "react";
-import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { signIn, useSession } from "next-auth/react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { SessionUser } from "../types";
 
 export default function Login() {
   const router = useRouter();
+  const { data: session, status } = useSession();
+  const searchParams = useSearchParams();
+  const callbackUrl = searchParams.get("callbackUrl") || "/";
+  
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Redirect if already logged in
+  useEffect(() => {
+    if (status === "authenticated" && session?.user) {
+      const user = session.user as SessionUser;
+      
+      // Get the user role from the session to redirect to the appropriate dashboard
+      let redirectPath = "/";
+      
+      if (user.role === "STUDENT") {
+        redirectPath = "/student";
+      } else if (user.role === "ADVISOR") {
+        redirectPath = "/advisor";
+      } else if (user.role === "DEPARTMENT_SECRETARY") {
+        redirectPath = "/department";
+      } else if (user.role === "FACULTY_SECRETARY") {
+        redirectPath = "/faculty"; 
+      } else if (user.role === "STUDENT_AFFAIRS") {
+        redirectPath = "/student-affairs";
+      }
+      
+      // If we have a callback URL and it doesn't include redirectCount (to prevent loops)
+      // use it, otherwise use the role-specific dashboard
+      if (callbackUrl && callbackUrl !== "/" && !callbackUrl.includes("redirectCount")) {
+        router.push(callbackUrl);
+      } else {
+        router.push(redirectPath);
+      }
+    }
+  }, [status, session, router, callbackUrl]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,34 +58,15 @@ export default function Login() {
         username,
         password,
         redirect: false,
-        callbackUrl: "/"
       });
 
       if (result?.error) {
         console.error("SignIn error:", result.error);
         setError("Invalid credentials. Please try again.");
-      } else if (result?.ok) {
-        // Get the user role from the username to redirect to the appropriate dashboard
-        let redirectPath = "/";
-        
-        if (username.includes("std")) {
-          redirectPath = "/student";
-        } else if (username.includes("adv")) {
-          redirectPath = "/advisor";
-        } else if (username.includes("dep")) {
-          redirectPath = "/department";
-        } else if (username.includes("fac")) {
-          redirectPath = "/faculty";
-        } else if (username.includes("aff")) {
-          redirectPath = "/student-affairs";
-        }
-        
-        // Redirect to role-specific dashboard
-        router.push(redirectPath);
-        router.refresh();
-      } else {
+      } else if (!result?.ok) {
         setError("Authentication failed. Please try again.");
       }
+      // Don't redirect here - the useEffect will handle it
     } catch (error) {
       console.error("Login error:", error);
       setError("An unexpected error occurred. Please try again.");

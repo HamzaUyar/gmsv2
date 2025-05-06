@@ -39,6 +39,16 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
   
+  // Check if there's already a redirect count in the URL to prevent redirect loops
+  const url = new URL(request.url);
+  const redirectCount = parseInt(url.searchParams.get('redirectCount') || '0');
+  
+  // If we've redirected too many times, just proceed to prevent a loop
+  if (redirectCount > 2) {
+    console.log("Too many redirects detected, proceeding with the request");
+    return NextResponse.next();
+  }
+  
   // Get the session token
   const token = await getToken({
     req: request,
@@ -47,9 +57,9 @@ export async function middleware(request: NextRequest) {
   
   // If there's no token and the user tried to access a protected route
   if (!token) {
-    const url = new URL("/login", request.url);
-    url.searchParams.set("callbackUrl", encodeURI(request.url));
-    return NextResponse.redirect(url);
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("callbackUrl", encodeURI(request.url));
+    return NextResponse.redirect(loginUrl);
   }
   
   // Get the user role from token
@@ -69,7 +79,12 @@ export async function middleware(request: NextRequest) {
   if (isAccessingForbiddenRoute) {
     // Find the user's allowed path based on their role
     const allowedPath = userRole ? rolePathMapping[userRole as keyof typeof rolePathMapping] : "/";
-    return NextResponse.redirect(new URL(allowedPath, request.url));
+    const redirectUrl = new URL(allowedPath, request.url);
+    
+    // Increment redirect count to prevent loops
+    redirectUrl.searchParams.set('redirectCount', (redirectCount + 1).toString());
+    
+    return NextResponse.redirect(redirectUrl);
   }
   
   return NextResponse.next();

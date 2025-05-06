@@ -98,6 +98,114 @@ const mockTranscripts: Record<string, any> = {
       totalCreditsEarned: 136,
       graduationStatusUBYS: "Potentially Eligible"
     }
+  },
+  "ubys_std_002": {
+    studentInfo: {
+      ubysId: "ubys_std_002",
+      studentNo: "202011002",
+      firstName: "Alice",
+      lastName: "Smith",
+      departmentName: "Computer Engineering",
+      facultyName: "Engineering Faculty"
+    },
+    semesters: [
+      {
+        semesterCode: "2020-FALL",
+        courses: [
+          { courseCode: "CS101", courseName: "Intro to Programming", credits: 6, grade: "AA", numericGrade: 4.0 },
+          { courseCode: "MATH101", courseName: "Calculus I", credits: 5, grade: "AA", numericGrade: 4.0 },
+          { courseCode: "PHYS101", courseName: "Physics I", credits: 4, grade: "BA", numericGrade: 3.5 },
+          { courseCode: "ENG101", courseName: "English I", credits: 3, grade: "BB", numericGrade: 3.0 }
+        ],
+        semesterGpa: 3.72
+      }
+    ],
+    summary: {
+      cumulativeGpa: 3.78,
+      totalCreditsEarned: 136,
+      graduationStatusUBYS: "Potentially Eligible"
+    }
+  },
+  "ubys_std_003": {
+    studentInfo: {
+      ubysId: "ubys_std_003",
+      studentNo: "202011003",
+      firstName: "Bob",
+      lastName: "Johnson",
+      departmentName: "Computer Engineering",
+      facultyName: "Engineering Faculty"
+    },
+    semesters: [
+      {
+        semesterCode: "2020-FALL",
+        courses: [
+          { courseCode: "CS101", courseName: "Intro to Programming", credits: 6, grade: "BA", numericGrade: 3.5 },
+          { courseCode: "MATH101", courseName: "Calculus I", credits: 5, grade: "BB", numericGrade: 3.0 },
+          { courseCode: "PHYS101", courseName: "Physics I", credits: 4, grade: "CB", numericGrade: 2.5 },
+          { courseCode: "ENG101", courseName: "English I", credits: 3, grade: "CC", numericGrade: 2.0 }
+        ],
+        semesterGpa: 2.89
+      }
+    ],
+    summary: {
+      cumulativeGpa: 3.25,
+      totalCreditsEarned: 136,
+      graduationStatusUBYS: "Potentially Eligible"
+    }
+  },
+  "ubys_std_004": {
+    studentInfo: {
+      ubysId: "ubys_std_004",
+      studentNo: "202011004",
+      firstName: "Emma",
+      lastName: "Wilson",
+      departmentName: "Electrical Engineering",
+      facultyName: "Engineering Faculty"
+    },
+    semesters: [
+      {
+        semesterCode: "2020-FALL",
+        courses: [
+          { courseCode: "EE101", courseName: "Intro to Electrical Engineering", credits: 6, grade: "AA", numericGrade: 4.0 },
+          { courseCode: "MATH101", courseName: "Calculus I", credits: 5, grade: "BA", numericGrade: 3.5 },
+          { courseCode: "PHYS101", courseName: "Physics I", credits: 4, grade: "AA", numericGrade: 4.0 },
+          { courseCode: "ENG101", courseName: "English I", credits: 3, grade: "BB", numericGrade: 3.0 }
+        ],
+        semesterGpa: 3.67
+      }
+    ],
+    summary: {
+      cumulativeGpa: 3.55,
+      totalCreditsEarned: 136,
+      graduationStatusUBYS: "Eligible"
+    }
+  },
+  "ubys_std_005": {
+    studentInfo: {
+      ubysId: "ubys_std_005",
+      studentNo: "202011005",
+      firstName: "Michael",
+      lastName: "Brown",
+      departmentName: "Business Administration",
+      facultyName: "Business Faculty"
+    },
+    semesters: [
+      {
+        semesterCode: "2020-FALL",
+        courses: [
+          { courseCode: "BA101", courseName: "Intro to Business", credits: 6, grade: "BA", numericGrade: 3.5 },
+          { courseCode: "ECON101", courseName: "Microeconomics", credits: 5, grade: "BB", numericGrade: 3.0 },
+          { courseCode: "MATH101", courseName: "Business Mathematics", credits: 4, grade: "BA", numericGrade: 3.5 },
+          { courseCode: "ENG101", courseName: "English I", credits: 3, grade: "AA", numericGrade: 4.0 }
+        ],
+        semesterGpa: 3.44
+      }
+    ],
+    summary: {
+      cumulativeGpa: 3.42,
+      totalCreditsEarned: 136,
+      graduationStatusUBYS: "Potentially Eligible"
+    }
   }
 };
 
@@ -118,11 +226,24 @@ export async function GET(
   }
   
   // Return a generic transcript if we don't have one for this student
+  // This allows our API to handle any student ID gracefully
   return NextResponse.json(
     {
-      error: "Transcript not found for this student",
-      studentUbysId
+      studentInfo: {
+        ubysId: studentUbysId,
+        studentNo: "Unknown",
+        firstName: "Unknown",
+        lastName: "Unknown",
+        departmentName: "Unknown",
+        facultyName: "Unknown"
+      },
+      semesters: [],
+      summary: {
+        cumulativeGpa: 0,
+        totalCreditsEarned: 0,
+        graduationStatusUBYS: "Not Eligible"
+      }
     },
-    { status: 404 }
+    { status: 200 }
   );
 } 

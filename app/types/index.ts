@@ -1,104 +1,67 @@
-// Define enums directly instead of importing from Prisma client
-export enum UserRole {
-  STUDENT = "STUDENT",
-  ADVISOR = "ADVISOR",
-  DEPARTMENT_SECRETARY = "DEPARTMENT_SECRETARY",
-  FACULTY_SECRETARY = "FACULTY_SECRETARY",
-  STUDENT_AFFAIRS = "STUDENT_AFFAIRS"
-}
+// Common types for the application
 
-export enum ApplicationStatus {
-  PENDING_ADVISOR_APPROVAL = "PENDING_ADVISOR_APPROVAL",
-  PENDING_DEPARTMENT_SECRETARY_APPROVAL = "PENDING_DEPARTMENT_SECRETARY_APPROVAL",
-  PENDING_FACULTY_SECRETARY_APPROVAL = "PENDING_FACULTY_SECRETARY_APPROVAL",
-  PENDING_STUDENT_AFFAIRS_TRANSCRIPT_APPROVAL = "PENDING_STUDENT_AFFAIRS_TRANSCRIPT_APPROVAL",
-  PENDING_STUDENT_AFFAIRS_DOCUMENT_APPROVAL = "PENDING_STUDENT_AFFAIRS_DOCUMENT_APPROVAL",
-  APPROVED_COMPLETED = "APPROVED_COMPLETED",
-  REJECTED_ADVISOR = "REJECTED_ADVISOR",
-  REJECTED_DEPARTMENT_SECRETARY = "REJECTED_DEPARTMENT_SECRETARY",
-  REJECTED_FACULTY_SECRETARY = "REJECTED_FACULTY_SECRETARY",
-  REJECTED_STUDENT_AFFAIRS_TRANSCRIPT = "REJECTED_STUDENT_AFFAIRS_TRANSCRIPT",
-  REJECTED_STUDENT_AFFAIRS_DOCUMENT = "REJECTED_STUDENT_AFFAIRS_DOCUMENT"
-}
+export type UserRole = 'STUDENT' | 'ADVISOR' | 'DEPARTMENT_SECRETARY' | 'FACULTY_SECRETARY' | 'STUDENT_AFFAIRS';
 
-export enum ApprovalStatus {
-  PENDING = "PENDING",
-  APPROVED = "APPROVED",
-  REJECTED = "REJECTED"
-}
-
-export enum CertificateType {
-  HONOUR = "HONOUR",
-  HIGH_HONOUR = "HIGH_HONOUR"
-}
-
-// Auth related types
-export interface SessionUser {
+export interface User {
   id: string;
-  ubysId: string;
-  email: string;
   firstName: string;
   lastName: string;
-  role: UserRole;
-  isActive: boolean;
-}
-
-// API response types
-export interface ApiResponse<T = any> {
-  success: boolean;
-  message?: string;
-  data?: T;
-  error?: any;
-}
-
-// UBYS Mock API types
-export interface UBYSUser {
-  ubysId: string;
   email: string;
+  ubysId: string;
+  role: UserRole;
+}
+
+// Extended user type for session data
+export interface SessionUser extends User {
+  // Any additional fields that might be needed for the session
+}
+
+// Student specific types
+export interface Student {
+  id: string;
   firstName: string;
   lastName: string;
-  role: UserRole;
-  additionalInfo?: Record<string, any>;
+  email: string;
+  ubysId: string;
+  role: 'STUDENT';
+  gpa: number;
+  totalCredits: number;
+  facultyRank?: number;
+  departmentRank?: number;
+  universityRank?: number;
+  isEligible?: boolean;
+  status?: 'PENDING_ADVISOR_APPROVAL' | 'APPROVED' | 'REJECTED';
 }
 
-export interface UBYSFaculty {
-  ubysFacultyId: string;
+// Faculty types
+export interface Faculty {
+  id: string;
   name: string;
+  totalStudents: number;
+  approvalStatus: 'APPROVED' | 'PENDING' | 'REJECTED';
+  approvalDate: string | null;
 }
 
-export interface UBYSDepartment {
-  ubysDepartmentId: string;
+// Department types
+export interface Department {
+  id: string;
   name: string;
-  facultyUbysId: string;
+  totalStudents: number;
+  approvalStatus: 'APPROVED' | 'PENDING' | 'REJECTED';
+  approvalDate: string | null;
 }
 
-export interface UBYSTranscriptCourse {
-  courseCode: string;
-  courseName: string;
-  credits: number;
-  grade: string;
-  numericGrade: number;
+// Document types
+export interface Document {
+  id: string;
+  studentName: string;
+  studentNo: string;
+  type: 'DIPLOMA' | 'CERTIFICATE';
+  certificateType?: 'HIGH_HONOUR' | 'HONOUR';
+  documentNumber: string;
+  generatedAt: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
 }
 
-export interface UBYSTranscriptSemester {
-  semesterCode: string;
-  courses: UBYSTranscriptCourse[];
-  semesterGpa: number;
-}
-
-export interface UBYSTranscript {
-  studentInfo: {
-    ubysId: string;
-    studentNo: string;
-    firstName: string;
-    lastName: string;
-    departmentName: string;
-    facultyName: string;
-  };
-  semesters: UBYSTranscriptSemester[];
-  summary: {
-    cumulativeGpa: number;
-    totalCreditsEarned: number;
-    graduationStatusUBYS?: string;
-  };
-} 
+// Approval status type
+export type ApprovalStatus = 'APPROVED' | 'PENDING' | 'REJECTED'; 
