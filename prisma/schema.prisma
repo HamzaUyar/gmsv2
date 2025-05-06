@@ -1,0 +1,341 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ENUMS
+
+enum UserRole {
+  STUDENT
+  ADVISOR
+  DEPARTMENT_SECRETARY
+  FACULTY_SECRETARY
+  STUDENT_AFFAIRS
+}
+
+enum ApplicationStatus {
+  PENDING_ADVISOR_APPROVAL
+  PENDING_DEPARTMENT_SECRETARY_APPROVAL
+  PENDING_FACULTY_SECRETARY_APPROVAL
+  PENDING_STUDENT_AFFAIRS_TRANSCRIPT_APPROVAL
+  PENDING_STUDENT_AFFAIRS_DOCUMENT_APPROVAL
+  APPROVED_COMPLETED
+  REJECTED_ADVISOR
+  REJECTED_DEPARTMENT_SECRETARY
+  REJECTED_FACULTY_SECRETARY
+  REJECTED_STUDENT_AFFAIRS_TRANSCRIPT
+  REJECTED_STUDENT_AFFAIRS_DOCUMENT
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CertificateType {
+  HONOUR
+  HIGH_HONOUR
+}
+
+
+// BASE MODELS
+
+model User {
+  id                         String                       @id @default(cuid())
+  ubysId                     String                       @unique
+  email                      String                       @unique
+  firstName                  String
+  lastName                   String
+  role                       UserRole
+  isActive                   Boolean                      @default(true)
+  createdAt                  DateTime                     @default(now())
+  updatedAt                  DateTime                     @updatedAt
+
+  studentProfile             StudentProfile?
+  advisorProfile             AdvisorProfile?
+  departmentSecretaryProfile DepartmentSecretaryProfile?
+  facultySecretaryProfile    FacultySecretaryProfile?
+  studentAffairsProfile      StudentAffairsProfile?
+}
+
+model Faculty {
+  id                         String                       @id @default(cuid())
+  ubysFacultyId              String                       @unique
+  name                       String
+  createdAt                  DateTime                     @default(now())
+  updatedAt                  DateTime                     @updatedAt
+
+  departments                Department[]
+  facultySecretaries         FacultySecretaryProfile[]
+  students                   StudentProfile[]
+  advisors                   AdvisorProfile[]
+  facultyGraduationApprovals FacultyGraduationApproval[]
+}
+
+model Department {
+  id                           String                        @id @default(cuid())
+  ubysDepartmentId             String                        @unique
+  name                         String
+  facultyId                    String
+  createdAt                    DateTime                      @default(now())
+  updatedAt                    DateTime                      @updatedAt
+
+  faculty                      Faculty                       @relation(fields: [facultyId], references: [id])
+  departmentSecretaries        DepartmentSecretaryProfile[]
+  students                     StudentProfile[]
+  advisors                     AdvisorProfile[]
+  departmentGraduationApprovals DepartmentGraduationApproval[]
+}
+
+
+// ROLE-BASED PROFILE MODELS
+
+model StudentProfile {
+  id                      String                 @id @default(cuid())
+  userId                  String                 @unique
+  studentNo               String                 @unique
+  nationalId              String?
+  birthDate               DateTime?
+  enrollmentDate          DateTime?
+  classLevel              Int                    @default(4)
+  departmentId            String
+  facultyId               String
+  advisorId               String?
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+
+  user                    User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department              Department             @relation(fields: [departmentId], references: [id])
+  faculty                 Faculty                @relation(fields: [facultyId], references: [id])
+  advisor                 AdvisorProfile?        @relation(fields: [advisorId], references: [id], onDelete: SetNull)
+  transcripts             Transcript[]
+  graduationApplication   GraduationApplication?
+  diploma                 Diploma?
+  certificates            Certificate[]
+}
+
+model AdvisorProfile {
+  id                  String                  @id @default(cuid())
+  userId              String                  @unique
+  departmentId        String
+  facultyId           String
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+
+  user                User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department          Department              @relation(fields: [departmentId], references: [id])
+  faculty             Faculty                 @relation(fields: [facultyId], references: [id])
+  advisedStudents     StudentProfile[]
+  approvedApplications GraduationApplication[] @relation("AdvisorApplicationApprovals")
+}
+
+model DepartmentSecretaryProfile {
+  id                             String                        @id @default(cuid())
+  userId                         String                        @unique
+  departmentId                   String                        @unique
+  createdAt                      DateTime                      @default(now())
+  updatedAt                      DateTime                      @updatedAt
+
+  user                           User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department                     Department                    @relation(fields: [departmentId], references: [id])
+  processedDepartmentApprovals   DepartmentGraduationApproval[] @relation("SecretaryDepartmentApprovals")
+}
+
+model FacultySecretaryProfile {
+  id                         String                       @id @default(cuid())
+  userId                     String                       @unique
+  facultyId                  String
+  createdAt                  DateTime                     @default(now())
+  updatedAt                  DateTime                     @updatedAt
+
+  user                       User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  faculty                    Faculty                      @relation(fields: [facultyId], references: [id])
+  processedFacultyApprovals  FacultyGraduationApproval[]  @relation("SecretaryFacultyApprovals")
+}
+
+model StudentAffairsProfile {
+  id                               String                         @id @default(cuid())
+  userId                           String                         @unique
+  createdAt                        DateTime                       @default(now())
+  updatedAt                        DateTime                       @updatedAt
+
+  user                             User                           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  processedUniversityApprovals     UniversityGraduationApproval[] @relation("StaffUniversityApprovals")
+  documentApprovals                UniversityGraduationApproval[] @relation("StaffDocumentApprovalUser")
+  finalizedDiplomas                Diploma[]                      @relation("StaffDiplomaFinalizations")
+  finalizedCertificates            Certificate[]                  @relation("StaffCertificateFinalizations")
+}
+
+
+// TRANSCRIPT & GRADUATION PROCESS MODELS
+
+model Transcript {
+  id                        String                 @id @default(cuid())
+  studentId                 String
+  ubysTranscriptId          String?
+  jsonData                  Json
+  gpa                       Float
+  totalCredits              Float
+  isEligibleForGraduation   Boolean                @default(false)
+  pulledAt                  DateTime               @default(now())
+  version                   Int                    @default(1)
+  isActive                  Boolean                @default(true)
+  createdAt                 DateTime               @default(now())
+  updatedAt                 DateTime               @updatedAt
+
+  student                   StudentProfile         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  graduationApplication     GraduationApplication? @relation("TranscriptForApplication")
+}
+
+model GraduationApplication {
+  id                              String                          @id @default(cuid())
+  studentId                       String                          @unique
+  transcriptId                    String                          @unique
+  applicationDate                 DateTime                        @default(now())
+  status                          ApplicationStatus               @default(PENDING_ADVISOR_APPROVAL)
+
+  advisorApprovalStatus           ApprovalStatus                  @default(PENDING)
+  advisorApprovedById             String?
+  advisorApprovalDate             DateTime?
+  advisorNotes                    String?
+
+  departmentApprovalId            String?                         @unique
+  departmentNotes                 String?
+
+  facultyApprovalId               String?                         @unique
+  facultyNotes                    String?
+
+  studentAffairsTranscriptApprovalId String?                      @unique
+  studentAffairsTranscriptNotes    String?
+
+  departmentRank                  Int?
+  facultyRank                     Int?
+  universityRank                  Int?
+  createdAt                       DateTime                        @default(now())
+  updatedAt                       DateTime                        @updatedAt
+
+  student                         StudentProfile                  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  transcript                      Transcript                      @relation("TranscriptForApplication", fields: [transcriptId], references: [id])
+  advisorApprovedBy               AdvisorProfile?                 @relation("AdvisorApplicationApprovals", fields: [advisorApprovedById], references: [id]) // This should be AdvisorProfile's user.id
+  departmentGraduationApproval    DepartmentGraduationApproval?   @relation(fields: [departmentApprovalId], references: [id])
+  facultyGraduationApproval       FacultyGraduationApproval?      @relation(fields: [facultyApprovalId], references: [id])
+  universityGraduationApproval    UniversityGraduationApproval?   @relation(fields: [studentAffairsTranscriptApprovalId], references: [id])
+  diploma                         Diploma?
+  certificates                    Certificate[]
+}
+
+model DepartmentGraduationApproval {
+  id                        String                  @id @default(cuid())
+  departmentId              String
+  approvalPeriodName        String?
+  status                    ApprovalStatus          @default(PENDING)
+  secretaryProcessedById    String?
+  secretaryProcessedAt      DateTime?
+  notes                     String?
+  allAdvisorApprovalsCompleted Boolean              @default(false)
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+
+  department                Department              @relation(fields: [departmentId], references: [id])
+  secretaryProcessedBy      DepartmentSecretaryProfile? @relation("SecretaryDepartmentApprovals", fields: [secretaryProcessedById], references: [id]) // User ID of secretary
+  applications              GraduationApplication[]
+
+  @@unique([departmentId, approvalPeriodName], name: "unique_dept_approval_period")
+}
+
+model FacultyGraduationApproval {
+  id                        String                  @id @default(cuid())
+  facultyId                 String
+  approvalPeriodName        String?
+  status                    ApprovalStatus          @default(PENDING)
+  secretaryProcessedById    String?
+  secretaryProcessedAt      DateTime?
+  notes                     String?
+  allDepartmentApprovalsCompleted Boolean           @default(false)
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+
+  faculty                   Faculty                 @relation(fields: [facultyId], references: [id])
+  secretaryProcessedBy      FacultySecretaryProfile? @relation("SecretaryFacultyApprovals", fields: [secretaryProcessedById], references: [id]) // User ID of secretary
+  applications              GraduationApplication[]
+
+  @@unique([facultyId, approvalPeriodName], name: "unique_faculty_approval_period")
+}
+
+model UniversityGraduationApproval {
+  id                        String                  @id @default(cuid())
+  approvalPeriodName        String?
+  transcriptApprovalStatus  ApprovalStatus          @default(PENDING)
+  staffTranscriptProcessedById String?
+  staffTranscriptProcessedAt DateTime?
+  transcriptNotes           String?
+  allFacultyApprovalsCompleted Boolean              @default(false)
+
+  documentApprovalStatus    ApprovalStatus          @default(PENDING)
+  staffDocumentProcessedById  String?
+  staffDocumentProcessedAt  DateTime?
+  documentNotes             String?
+  allDocumentsGenerated     Boolean                 @default(false)
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+
+  staffTranscriptProcessedBy  StudentAffairsProfile?  @relation("StaffUniversityApprovals", fields: [staffTranscriptProcessedById], references: [id]) // User ID of staff
+  staffDocumentProcessedBy    StudentAffairsProfile?  @relation(name: "StaffDocumentApprovalUser", fields: [staffDocumentProcessedById], references: [id]) // User ID of staff
+  applications                GraduationApplication[]
+
+  @@unique([approvalPeriodName], name: "unique_university_approval_period")
+}
+
+
+// DIPLOMA & CERTIFICATE MODELS
+
+model Diploma {
+  id                        String                  @id @default(cuid())
+  studentId                 String                  @unique
+  graduationApplicationId   String                  @unique
+  diplomaNumber             String                  @unique
+  issueDate                 DateTime?
+  filePath                  String?
+  generatedAt               DateTime                @default(now())
+  finalApprovalStatus       ApprovalStatus          @default(PENDING)
+  finalApprovedById         String?
+  finalApprovalDate         DateTime?
+  version                   Int                     @default(1)
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+
+  student                   StudentProfile          @relation(fields: [studentId], references: [id])
+  graduationApplication     GraduationApplication   @relation(fields: [graduationApplicationId], references: [id])
+  finalApprovedBy           StudentAffairsProfile?  @relation("StaffDiplomaFinalizations", fields: [finalApprovedById], references: [id]) // User ID of staff
+}
+
+model Certificate {
+  id                        String                  @id @default(cuid())
+  studentId                 String
+  graduationApplicationId   String
+  type                      CertificateType
+  certificateNumber         String                  @unique
+  issueDate                 DateTime?
+  filePath                  String?
+  generatedAt               DateTime                @default(now())
+  finalApprovalStatus       ApprovalStatus          @default(PENDING)
+  finalApprovedById         String?
+  finalApprovalDate         DateTime?
+  version                   Int                     @default(1)
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+
+  student                   StudentProfile          @relation(fields: [studentId], references: [id])
+  graduationApplication     GraduationApplication   @relation(fields: [graduationApplicationId], references: [id])
+  finalApprovedBy           StudentAffairsProfile?  @relation("StaffCertificateFinalizations", fields: [finalApprovedById], references: [id]) // User ID of staff
+
+  @@index([studentId, type])
+} 

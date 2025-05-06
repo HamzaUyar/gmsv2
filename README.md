@@ -1,36 +1,116 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# University Graduation Management System (GMS)
+
+A web-based system designed to streamline the university graduation approval process, from student transcript evaluation to diploma and certificate generation.
+
+## Project Overview
+
+The University Graduation Management System (GMS) is a comprehensive platform that manages the entire graduation approval workflow for universities. It involves various user roles (Students, Advisors, Department Secretaries, Faculty Secretaries, and Student Affairs Staff) and integrates with a mock "UBYS" (University Information Management System) API for data retrieval.
+
+### Key Features
+
+- **Role-Based Access Control**: Different user interfaces and permissions based on roles
+- **Transcript Evaluation**: Automated eligibility checks based on GPA and credit requirements
+- **Multi-Level Approval Workflow**: Hierarchical approval process from advisors to student affairs
+- **Student Ranking**: Automatic ranking at department, faculty, and university levels
+- **Document Generation**: Simulated diploma and certificate generation with approval workflow
+
+## Technology Stack
+
+- **Frontend**: Next.js (React), Tailwind CSS
+- **Backend**: Next.js API Routes
+- **Database**: PostgreSQL
+- **ORM**: Prisma
+- **Authentication**: NextAuth.js
+
+## User Roles & Workflows
+
+### Student
+- View transcript and graduation eligibility status
+- Track graduation application progress
+- View approved documents (diploma, certificates)
+
+### Advisor
+- Review assigned students' transcripts
+- Approve or reject graduation eligibility
+
+### Department Secretary
+- View students approved by advisors within their department
+- Review department-level rankings
+- Approve the entire department's list
+
+### Faculty Secretary
+- View lists approved by Department Secretaries within their faculty
+- Review faculty-level rankings
+- Approve the entire faculty's list
+
+### Student Affairs Staff
+- Initialize system data from UBYS
+- Review university-level rankings
+- Provide final approval for transcripts
+- Generate and approve diplomas and certificates
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- Node.js (v18 or later)
+- PostgreSQL database
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Installation
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Clone the repository:
+   ```
+   git clone <repository-url>
+   cd gms
+   ```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+2. Install dependencies:
+   ```
+   npm install
+   ```
 
-## Learn More
+3. Set up environment variables:
+   Create a `.env` file in the root directory with the following:
+   ```
+   DATABASE_URL="postgresql://username:password@localhost:5432/gms_db?schema=public"
+   NEXTAUTH_SECRET="your-secret-key"
+   NEXTAUTH_URL="http://localhost:3000"
+   ```
 
-To learn more about Next.js, take a look at the following resources:
+4. Set up the database:
+   ```
+   npx prisma migrate dev --name init
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+5. Run the development server:
+   ```
+   npm run dev
+   ```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+6. Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-## Deploy on Vercel
+### Demo Credentials
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+For testing purposes, you can use the following mock UBYS IDs:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Student: `ubys_std_001`
+- Advisor: `ubys_adv_001`
+- Department Secretary: `ubys_dep_001`
+- Faculty Secretary: `ubys_fac_001`
+- Student Affairs: `ubys_aff_001`
+
+Any password will work with the demo system.
+
+## Project Structure
+
+- `/app`: Next.js App Router components and pages
+- `/app/api`: API routes for backend functionality
+- `/app/api/mock/ubys`: Mock UBYS API endpoints
+- `/app/components`: Reusable UI components
+- `/app/(pages)`: Role-specific dashboard pages
+- `/prisma`: Database schema and migrations
+- `/lib`: Utility functions and shared code
+
+## License
+
+This project is licensed under the MIT License.

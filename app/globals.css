@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 0, 0, 0;
+  --background-rgb: 248, 249, 250; /* Lighter background */
+  --iyte-red: 152, 30, 50; /* IYTE Red */
+  --primary: 152, 30, 50; /* IYTE Red as primary */
+  --primary-light: 223, 77, 100;
+  --primary-dark: 120, 24, 40;
+  --secondary: 255, 255, 255;
+  --accent: 0, 122, 255; /* Accent for highlights */
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: rgb(var(--background-rgb));
+} 
